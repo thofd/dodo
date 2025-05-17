@@ -40,12 +40,24 @@ jobs:
          echo "export PATH=$PWD/clang-r450784e/bin:\$PATH" >> $GITHUB_ENV
 
 
+
       - name: Apply SUSFS & KernelSU patches
         run: |
-          git clone --depth=1 https://github.com/ShirkNeko/SukiSU-Ultra.git -b susfs-stable susfs
-          git clone --depth=1 https://github.com/tiann/KernelSU.git KernelSU
-          cd susfs && bash apply_patch.sh ../ && cd ..
-          cd KernelSU && bash apply_patches.sh ../ && cd ..
+          # 克隆源码（--single-branch 可减少体积）
+          git clone --depth=1 --single-branch -b susfs-stable https://github.com/ShirkNeko/SukiSU-Ultra.git susfs
+          git clone --depth=1 --single-branch https://github.com/tiann/KernelSU.git KernelSU
+
+          # 打 SUSFS 补丁
+          cd susfs/scripts
+          bash apply_patch.sh ../../   # ../../ 指向项目根目录
+          cd ../../
+
+          # 打 KernelSU 补丁
+          cd KernelSU/scripts
+          bash apply_patches.sh ../../
+          cd ../../
+
+
 
       - name: Configure defconfig
         run: make vendor/gauguin_user_defconfig
