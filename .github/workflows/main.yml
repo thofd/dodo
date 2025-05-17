@@ -43,7 +43,6 @@ jobs:
 
       - name: Apply SUSFS & KernelSU patches
         run: |
-          # 克隆源码（--single-branch 可减少体积）
           git clone --depth=1 --single-branch -b susfs-stable https://github.com/ShirkNeko/SukiSU-Ultra.git susfs
           git clone --depth=1 --single-branch https://github.com/tiann/KernelSU.git KernelSU
 
