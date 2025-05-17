@@ -7,89 +7,59 @@ on:
 
 jobs:
   build:
-    name: Build gauguin Kernel
+    name: Compile SukiSU-Ultra Kernel
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
-
-    env:
-      # 内核架构
-      ARCH: arm64
-      SUBARCH: arm64
-      # 定义 CC、CROSS 前缀，供 make 使用
-      CROSS_COMPILE: aarch64-linux-android-
-      CROSS_COMPILE_COMPAT: arm-linux-androideabi-
-      # Clang 下载目录
-      CLANG_DIR: ${{ runner.workspace }}/clang
-      # 输出目录
-      OUTPUT_DIR: out
 
     steps:
-      # 1. 检出源码
       - name: Checkout source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0    # 取全量历史，便于补丁/合并操作
+        uses: actions/checkout@v3
 
-      # 2. 缓存 ccache
-      - name: Cache ccache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('**/kernel/**/*') }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-
-      # 3. 安装依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y bc bison build-essential ccache curl flex git kmod libssl-dev libelf-dev libudev-dev lzop python2 python3 unzip zip
+          sudo apt-get install -y bc kmod libssl-dev flex bison python3 python3-distutils
 
-      # 4. 获取 AOSP Clang（只取最新）
-      - name: Download AOSP Clang
-        run: |
-          if [ ! -d "$CLANG_DIR" ]; then
-            git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang
-          fi
-      - name: Add Clang to PATH
-        run: echo "${{ env.CLANG_DIR }}/clang-r416183b/bin" >> $GITHUB_PATH
-
-      # 5. （可选）集成 SukiSU‑Ultra 与 SUSFS
-      #    如果已经在源码中完成，可注释以下两步
-      - name: Apply SukiSU‑Ultra patches
-        run: |
-          # 假设补丁在 repo 中的 patches/SukiSU
-          git am patches/SukiSU‑Ultra/*.patch
-      - name: Merge SUSFS
-        run: |
-          git remote add kernel-4.19 https://gitlab.com/simonpunk/susfs4ksu.git
-          git fetch susfs susfs-stable
-          git merge susfs/susfs-stable --no-edit
-
-      # 6. 配置内核
-      - name: Load Gauguin defconfig
-        run: make O=${{ env.OUTPUT_DIR }} vendor/gauguin_user_defconfig
-
-      # 7. 开启 ccache（可选）
-      - name: Configure ccache
-        run: |
-          export USE_CCACHE=1
-          ccache -M 50G
-          ccache -s
-
-      # 8. 编译
-      - name: Compile kernel
-        run: |
-          make -j$(nproc) O=${{ env.OUTPUT_DIR }} \
-            CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
-            CROSS_COMPILE_COMPAT=${{ env.CROSS_COMPILE_COMPAT }}
-
-      # 9. 上传编译产物
-      - name: Upload kernel Image
-        uses: actions/upload-artifact@v4
+      - name: Install ccache
+        uses: Setup-ccache-gh-actions@v1
         with:
-          name: gauguin-Image
-          path: ${{ env.OUTPUT_DIR }}/arch/arm64/boot/Image
+          max_size: '10G'
+
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Setup AOSP Clang
+        run: |
+          wget -qO clang.tar.gz https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/clang-r416183b.tar.gz
+          tar xf clang.tar.gz
+          echo "export PATH=$PWD/clang-r416183b/bin:\$PATH" >> $GITHUB_ENV
+
+      - name: Apply SUSFS & KernelSU patches
+        run: |
+          git clone --depth=1 https://github.com/ShirkNeko/SukiSU-Ultra.git -b susfs-stable susfs
+          git clone --depth=1 https://github.com/tiann/KernelSU.git KernelSU
+          cd susfs && bash apply_patch.sh ../ && cd ..
+          cd KernelSU && bash apply_patches.sh ../ && cd ..
+
+      - name: Configure defconfig
+        run: make vendor/gauguin_user_defconfig
+
+      - name: Build kernel
+        run: |
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy
+
+      - name: Prepare AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cp arch/arm64/boot/Image.gz-dtb AnyKernel3
+          cd AnyKernel3 && zip -r ../SukiSU-gauguin.zip .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: SukiSU-Ultra-gauguin
+          path: SukiSU-gauguin.zip
