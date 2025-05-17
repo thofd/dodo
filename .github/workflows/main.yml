@@ -34,7 +34,7 @@ jobs:
 
       - name: Setup AOSP Clang
         run: |
-          wget --content-disposition https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/clang-r416183b.tar.gz
+          wget https://storage.googleapis.com/android-clang/clang-r416183b-linux-x86.tar.xz
           tar xf clang.tar.gz
           echo "export PATH=$PWD/clang-r416183b/bin:\$PATH" >> $GITHUB_ENV
 
