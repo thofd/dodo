@@ -37,12 +37,12 @@ jobs:
       run: |
         cd kernel_src
         git clone --depth=1 https://github.com/ShirkNeko/SukiSU-Ultra susfs
-        git clone --depth=1 https://github.com/ni-qiuqiu/apatch_kpm_read kpm
+        # git clone --depth=1 https://github.com/ni-qiuqiu/apatch_kpm_read kpm
         cp -r susfs/susfs drivers/susfs
-        cp -r kpm/include/uapi/linux/kpm.h include/uapi/linux/
-        cp -r kpm/kernel/kpm drivers/kpm
+        # cp -r kpm/include/uapi/linux/kpm.h include/uapi/linux/
+        # cp -r kpm/kernel/kpm drivers/kpm
         grep -q 'susfs/' drivers/Makefile || echo "obj- += susfs/" >> drivers/Makefile
-        grep -q 'kpm/' drivers/Makefile || echo "obj- += kpm/" >> drivers/Makefile
+        # grep -q 'kpm/' drivers/Makefile || echo "obj- += kpm/" >> drivers/Makefile
 
     - name: Setup AOSP Clang
       run: |
