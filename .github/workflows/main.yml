@@ -1,78 +1,89 @@
-# .github/workflows/build.yml
-name: Build Gauguin SukiSU‑Ultra Kernel
+name: Build gauguin Kernel
 
-# 手动触发
 on:
   workflow_dispatch:
-
+  
 jobs:
   build:
-    name: Compile SukiSU-Ultra Kernel
+    name: Build Kernel for gauguin
     runs-on: ubuntu-22.04
 
+    env:
+      DEVICE: gauguin
+      DEFCONFIG: vendor/gauguin_user_defconfig
+      KERNEL_REPO: https://github.com/thofd/neko_kernel_xiaomi_gauguin
+      KERNEL_BRANCH: main
+      CLANG_VERSION: r416183b
+      ANDROID_VERSION: 12
+      ZIP_NAME: gauguin-kernel.zip
+
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc kmod libssl-dev flex bison python3 python3-distutils
+    - name: Clone kernel source manually
+      run: |
+        git clone --depth=1 --branch $KERNEL_BRANCH $KERNEL_REPO kernel_src
 
-      - name: Install ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          max_size: '10G'
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: kernel_src/.ccache
+        key: ccache-${{ runner.os }}-${{ env.DEVICE }}-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ env.DEVICE }}-
 
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
+    - name: Pull SUSFS & KPM
+      run: |
+        cd kernel_src
+        git clone --depth=1 https://github.com/ShirkNeko/SukiSU-Ultra susfs
+        git clone --depth=1 https://github.com/ShadyModder/KPM kpm
+        cp -r susfs/susfs drivers/susfs
+        cp -r kpm/include/uapi/linux/kpm.h include/uapi/linux/
+        cp -r kpm/kernel/kpm drivers/kpm
+        grep -q 'susfs/' drivers/Makefile || echo "obj- += susfs/" >> drivers/Makefile
+        grep -q 'kpm/' drivers/Makefile || echo "obj- += kpm/" >> drivers/Makefile
 
-      - name: Setup AOSP Clang
-        run: |
-         wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2022/clang-r450784e.tar.gz
-         mv clang-r450784e.tar.gz clang.tar.gz
-         tar xf clang.tar.gz
-         echo "export PATH=$PWD/clang-r450784e/bin:\$PATH" >> $GITHUB_ENV
+    - name: Setup AOSP Clang
+      run: |
+        cd kernel_src
+        mkdir -p toolchain
+        wget -q https://github.com/itsHarshhh/kernel_toolchains/releases/download/aosp-clang-${CLANG_VERSION}/clang.tar.gz
+        tar -C toolchain -xzf clang.tar.gz
 
+    - name: Build Kernel
+      run: |
+        cd kernel_src
+        export PATH=$PWD/toolchain/bin:$PATH
+        export CCACHE_DIR=$PWD/.ccache
+        export USE_CCACHE=1
+        ccache -M 2G
+        ccache -z
+        make O=out ARCH=arm64 $DEFCONFIG
+        make -j$(nproc) O=out ARCH=arm64 CC="ccache clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- LLVM=1
+        ccache -s
 
+    - name: Copy Image
+      run: |
+        mkdir -p output
+        cp kernel_src/out/arch/arm64/boot/Image output/
 
-      - name: Apply SUSFS & KernelSU patches
-        run: |
-          git clone --depth=1 --single-branch -b susfs-stable https://github.com/ShirkNeko/SukiSU-Ultra.git susfs
-          git clone --depth=1 --single-branch https://github.com/tiann/KernelSU.git KernelSU
+    - name: Create simple flashable zip
+      run: |
+        mkdir -p zip/META-INF/com/google/android
+        echo "ui_print(\"Flashing gauguin kernel...\");" > zip/META-INF/com/google/android/updater-script
+        mkdir -p zip/kernel
+        cp output/Image zip/kernel/
+        (cd zip && zip -r ../${{ env.ZIP_NAME }} .)
 
-          # 打 SUSFS 补丁
-          cd susfs/scripts
-          bash apply_patch.sh ../../   # ../../ 指向项目根目录
-          cd ../../
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-Artifacts
+        path: |
+          output/Image
+          ${{ env.ZIP_NAME }}
 
-          # 打 KernelSU 补丁
-          cd KernelSU/scripts
-          bash apply_patches.sh ../../
-          cd ../../
-
-
-
-      - name: Configure defconfig
-        run: make vendor/gauguin_user_defconfig
-
-      - name: Build kernel
-        run: |
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy
-
-      - name: Prepare AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-          cp arch/arm64/boot/Image.gz-dtb AnyKernel3
-          cd AnyKernel3 && zip -r ../SukiSU-gauguin.zip .
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SukiSU-Ultra-gauguin
-          path: SukiSU-gauguin.zip
+    - name: Clean up
+      run: |
+        rm -rf kernel_src toolchain zip output *.tar.gz
